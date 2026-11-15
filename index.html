@@ -641,18 +641,46 @@
     .log-meta {
       display: flex;
       flex-direction: column;
+      gap: 3px;
+      flex: 1;
+    }
+
+    .log-header-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
     }
 
     .log-name {
-      font-size: 13.5px;
+      font-size: 14px;
       font-weight: 700;
       color: var(--text-main);
     }
 
-    .log-sub {
-      font-size: 11px;
+    .log-category-tag {
+      font-size: 10.5px;
+      font-weight: 700;
+      padding: 1.5px 7px;
+      border-radius: 6px;
+      display: inline-flex;
+      align-items: center;
+    }
+
+    .tag-eat { background: #fee2e2; color: #b91c1c; }
+    .tag-move { background: #e0f2fe; color: #0369a1; }
+    .tag-misc { background: #fef3c7; color: #b45309; }
+
+    .log-timestamp {
+      font-size: 11.5px;
       color: var(--text-sub);
-      margin-top: 1px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .log-timestamp svg {
+      opacity: 0.7;
     }
 
     .log-right {
@@ -1142,10 +1170,21 @@
     const WEEK_LIVING_BUDGET = 250000;
 
     const CATEGORIES = {
-      eat: { name: 'Ăn uống', icon: '🍜', class: 'icon-eat' },
-      move: { name: 'Đi lại / Xe', icon: '🛵', class: 'icon-move' },
-      misc: { name: 'Phát sinh', icon: '☕', class: 'icon-misc' }
+      eat: { name: 'Ăn uống', icon: '🍜', class: 'icon-eat', tagClass: 'tag-eat' },
+      move: { name: 'Đi lại / Xe', icon: '🛵', class: 'icon-move', tagClass: 'tag-move' },
+      misc: { name: 'Phát sinh', icon: '☕', class: 'icon-misc', tagClass: 'tag-misc' }
     };
+
+    function formatDateTime(d) {
+      const days = ['Chủ Nhật', 'Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7'];
+      const dayName = days[d.getDay()];
+      const hh = d.getHours().toString().padStart(2, '0');
+      const mm = d.getMinutes().toString().padStart(2, '0');
+      const dd = d.getDate().toString().padStart(2, '0');
+      const MM = (d.getMonth() + 1).toString().padStart(2, '0');
+      const yyyy = d.getFullYear();
+      return `${hh}:${mm} • ${dayName}, ${dd}/${MM}/${yyyy}`;
+    }
 
     const STORAGE_KEY = 'v_wallet_log_2026_v2';
 
@@ -1397,14 +1436,24 @@
         logContainer.innerHTML = '';
         curWeek.logs.forEach(item => {
           const catInfo = CATEGORIES[item.category] || CATEGORIES.misc;
+          const displayTime = item.time || 'Vừa xong';
           const el = document.createElement('div');
           el.className = 'log-item';
           el.innerHTML = `
             <div class="log-left">
               <div class="log-icon-badge ${catInfo.class}">${catInfo.icon}</div>
               <div class="log-meta">
-                <span class="log-name">${escapeHTML(item.name)}</span>
-                <span class="log-sub">${catInfo.name} • ${item.time || 'Vừa xong'}</span>
+                <div class="log-header-row">
+                  <span class="log-name">${escapeHTML(item.name)}</span>
+                  <span class="log-category-tag ${catInfo.tagClass || 'tag-misc'}">${catInfo.name}</span>
+                </div>
+                <div class="log-timestamp">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <polyline points="12 6 12 12 16 14"></polyline>
+                  </svg>
+                  <span>${displayTime}</span>
+                </div>
               </div>
             </div>
             <div class="log-right">
@@ -1490,7 +1539,7 @@
       curWeek.isStarted = true;
 
       const now = new Date();
-      const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')} - ${now.getDate()}/${now.getMonth() + 1}`;
+      const timeStr = formatDateTime(now);
       const dateStr = `${now.getDate()}/${now.getMonth() + 1}/${now.getFullYear()}`;
 
       const newExpense = {
@@ -1694,21 +1743,43 @@
 
       const width = 640;
       const basePadding = 32;
-      const itemRowHeight = 44;
-      const headerHeight = 220;
-      const categorySummaryHeight = 130;
-      const totalBlockHeight = 190;
-      const footerHeight = 110;
-      
-      const dynamicItemsCount = Math.max(1, logsToPrint.length);
-      const height = headerHeight + categorySummaryHeight + (dynamicItemsCount * itemRowHeight) + totalBlockHeight + footerHeight;
+
+      // Nhóm khoản chi gọn gàng theo yêu cầu:
+      // Khoản chi tiêu : bao nhiêu đó....
+      //         chi cái gì : bao nhiêu tiền
+      const catOrder = [
+        { key: 'eat', title: '🍜 KHOẢN ĂN UỐNG' },
+        { key: 'move', title: '🛵 KHOẢN ĐI LẠI / XĂNG XE' },
+        { key: 'misc', title: '☕ KHOẢN PHÁT SINH' }
+      ];
+
+      const grouped = {
+        eat: logsToPrint.filter(x => x.category === 'eat'),
+        move: logsToPrint.filter(x => x.category === 'move'),
+        misc: logsToPrint.filter(x => x.category === 'misc')
+      };
+
+      // Tính chiều cao canvas tự động chuẩn xác không bị dư khoảng trắng
+      let calculatedHeight = 145; // Header
+      catOrder.forEach(c => {
+        const items = grouped[c.key];
+        calculatedHeight += 34 + 10; // Category Header Box
+        if (items.length === 0) {
+          calculatedHeight += 24;
+        } else {
+          calculatedHeight += (items.length * 38);
+        }
+        calculatedHeight += 12; // Gap
+      });
+      calculatedHeight += 155; // Financial Summary
+      calculatedHeight += 95; // Footer message, barcode & padding
 
       canvas.width = width;
-      canvas.height = height;
+      canvas.height = calculatedHeight;
 
       // 1. Draw Receipt Background
       ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, width, height);
+      ctx.fillRect(0, 0, width, calculatedHeight);
 
       // Top decorative bar
       ctx.fillStyle = '#0d9488';
@@ -1728,151 +1799,133 @@
       ctx.fillText('Giúp Bảo Tiết Kiệm Từng Ngày • Kế Hoạch 1 Triệu / Tháng', width / 2, 104);
 
       // Dashed separator function
-      function drawDashedLine(y) {
+      function drawDashedLine(lineY) {
         ctx.strokeStyle = '#cbd5e1';
         ctx.lineWidth = 1.5;
         ctx.setLineDash([6, 5]);
         ctx.beginPath();
-        ctx.moveTo(basePadding, y);
-        ctx.lineTo(width - basePadding, y);
+        ctx.moveTo(basePadding, lineY);
+        ctx.lineTo(width - basePadding, lineY);
         ctx.stroke();
         ctx.setLineDash([]);
       }
 
       drawDashedLine(124);
 
-      // 3. Category Breakdown Mini Table
-      let curY = 154;
-      ctx.font = 'bold 15px -apple-system, sans-serif';
-      ctx.fillStyle = '#0f172a';
-      ctx.textAlign = 'left';
-      ctx.fillText('PHÂN BỔ CHI TIÊU', basePadding, curY);
+      // 3. Render Grouped Categories & Indented Items (Tách dòng, không bao giờ đè chữ)
+      let y = 145;
+      catOrder.forEach(c => {
+        const items = grouped[c.key];
+        const catSpent = items.reduce((sum, it) => sum + it.amount, 0);
 
-      curY += 26;
-      ctx.font = '14px -apple-system, sans-serif';
-      ctx.fillStyle = '#334155';
-      ctx.fillText('🍜 Ăn uống:', basePadding, curY);
-      ctx.textAlign = 'right';
-      ctx.fillText(formatMoney(eatSpent) + ' đ', width - basePadding, curY);
+        // Header: Khoản chi tiêu : bao nhiêu đó....
+        ctx.fillStyle = '#f8fafc';
+        ctx.fillRect(basePadding, y, width - (basePadding * 2), 34);
+        ctx.strokeStyle = '#e2e8f0';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(basePadding, y, width - (basePadding * 2), 34);
 
-      curY += 24;
-      ctx.textAlign = 'left';
-      ctx.fillText('🛵 Đi lại / Xăng xe:', basePadding, curY);
-      ctx.textAlign = 'right';
-      ctx.fillText(formatMoney(moveSpent) + ' đ', width - basePadding, curY);
+        ctx.font = 'bold 14.5px -apple-system, sans-serif';
+        ctx.fillStyle = '#0f172a';
+        ctx.textAlign = 'left';
+        ctx.fillText(c.title, basePadding + 12, y + 22);
 
-      curY += 24;
-      ctx.textAlign = 'left';
-      ctx.fillText('☕ Phát sinh:', basePadding, curY);
-      ctx.textAlign = 'right';
-      ctx.fillText(formatMoney(miscSpent) + ' đ', width - basePadding, curY);
+        ctx.textAlign = 'right';
+        ctx.fillStyle = catSpent > 0 ? '#0f766e' : '#94a3b8';
+        ctx.fillText(`${formatMoney(catSpent)} đ`, width - basePadding - 12, y + 22);
 
-      curY += 22;
-      drawDashedLine(curY);
+        y += 34 + 10; // Chuyển con trỏ xuống dưới hộp header
 
-      // 4. Itemized Transaction Table Header
-      curY += 30;
-      ctx.font = 'bold 14px -apple-system, sans-serif';
-      ctx.fillStyle = '#0f172a';
-      ctx.textAlign = 'left';
-      ctx.fillText('CHI TIẾT CÁC LẦN TIÊU', basePadding, curY);
-      ctx.textAlign = 'right';
-      ctx.fillText('SỐ TIỀN', width - basePadding, curY);
-
-      curY += 12;
-      ctx.strokeStyle = '#e2e8f0';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(basePadding, curY);
-      ctx.lineTo(width - basePadding, curY);
-      ctx.stroke();
-
-      // Items rows
-      if (logsToPrint.length === 0) {
-        curY += 34;
-        ctx.font = 'italic 14px -apple-system, sans-serif';
-        ctx.fillStyle = '#94a3b8';
-        ctx.textAlign = 'center';
-        ctx.fillText('(Không có khoản chi nào)', width / 2, curY);
-      } else {
-        logsToPrint.forEach(item => {
-          curY += 28;
-          ctx.font = 'bold 14px -apple-system, sans-serif';
-          ctx.fillStyle = '#0f172a';
+        // Thụt lề: chi cái gì : bao nhiêu tiền
+        if (items.length === 0) {
+          ctx.font = 'italic 13px -apple-system, sans-serif';
+          ctx.fillStyle = '#94a3b8';
           ctx.textAlign = 'left';
-          const cat = CATEGORIES[item.category] || CATEGORIES.misc;
-          ctx.fillText(`${cat.icon} ${item.name}`, basePadding, curY);
+          ctx.fillText('• (Chưa có khoản chi nào)', basePadding + 16, y + 14);
+          y += 24;
+        } else {
+          items.forEach(it => {
+            // Dòng 1: Tên món (bên trái) & Số tiền (bên phải)
+            ctx.font = 'bold 13.5px -apple-system, sans-serif';
+            ctx.fillStyle = '#1e293b';
+            ctx.textAlign = 'left';
+            ctx.fillText(`• ${it.name}`, basePadding + 16, y + 14);
 
-          ctx.textAlign = 'right';
-          ctx.fillText(`-${formatMoney(item.amount)} đ`, width - basePadding, curY);
+            ctx.textAlign = 'right';
+            ctx.fillStyle = '#ef4444';
+            ctx.fillText(`-${formatMoney(it.amount)} đ`, width - basePadding - 12, y + 14);
 
-          curY += 18;
-          ctx.font = '12px -apple-system, sans-serif';
-          ctx.fillStyle = '#64748b';
-          ctx.textAlign = 'left';
-          ctx.fillText(`${cat.name} • ${item.time || ''}`, basePadding, curY);
-        });
-      }
+            // Dòng 2: Ngày giờ ghi chép bên dưới (màu xám, không va chạm với số tiền)
+            ctx.font = '12px -apple-system, sans-serif';
+            ctx.fillStyle = '#64748b';
+            ctx.textAlign = 'left';
+            ctx.fillText(`  ${it.time || ''}`, basePadding + 22, y + 30);
 
-      curY += 24;
-      drawDashedLine(curY);
+            y += 38;
+          });
+        }
 
-      // 5. Total Financial Summary
-      curY += 32;
+        y += 12; // Khoảng cách tới danh mục tiếp theo
+      });
+
+      drawDashedLine(y);
+
+      // 4. Total Financial Summary
+      let sumY = y + 28;
       ctx.font = '15px -apple-system, sans-serif';
       ctx.fillStyle = '#475569';
       ctx.textAlign = 'left';
-      ctx.fillText('Tổng hạn mức ban đầu:', basePadding, curY);
+      ctx.fillText('Tổng hạn mức ban đầu:', basePadding, sumY);
       ctx.textAlign = 'right';
-      ctx.fillText(formatMoney(totalBudget) + ' đ', width - basePadding, curY);
+      ctx.fillText(formatMoney(totalBudget) + ' đ', width - basePadding, sumY);
 
-      curY += 26;
+      sumY += 26;
       ctx.textAlign = 'left';
       ctx.font = 'bold 16px -apple-system, sans-serif';
       ctx.fillStyle = '#0f172a';
-      ctx.fillText('TỔNG TIỀN ĐÃ CHI:', basePadding, curY);
+      ctx.fillText('TỔNG TIỀN ĐÃ CHI:', basePadding, sumY);
       ctx.textAlign = 'right';
       ctx.fillStyle = '#ef4444';
-      ctx.fillText(`-${formatMoney(totalSpent)} đ`, width - basePadding, curY);
+      ctx.fillText(`-${formatMoney(totalSpent)} đ`, width - basePadding, sumY);
 
-      curY += 26;
+      sumY += 26;
       ctx.textAlign = 'left';
       ctx.font = 'bold 15px -apple-system, sans-serif';
       ctx.fillStyle = '#0f172a';
-      ctx.fillText('SỐ DƯ CÒN LẠI TRONG VÍ:', basePadding, curY);
+      ctx.fillText('SỐ DƯ CÒN LẠI TRONG VÍ:', basePadding, sumY);
       ctx.textAlign = 'right';
       ctx.fillStyle = '#0d9488';
-      ctx.fillText(`${formatMoney(remainVal)} đ`, width - basePadding, curY);
+      ctx.fillText(`${formatMoney(remainVal)} đ`, width - basePadding, sumY);
 
-      curY += 26;
+      sumY += 26;
       ctx.textAlign = 'left';
       ctx.font = '14px -apple-system, sans-serif';
       ctx.fillStyle = '#0284c7';
       if (type === 'week') {
-        ctx.fillText('🐷 Tiền dư dồn vào Heo Đất:', basePadding, curY);
+        ctx.fillText('🐷 Tiền dư dồn vào Heo Đất:', basePadding, sumY);
         ctx.textAlign = 'right';
-        ctx.fillText(`+${formatMoney(surplusVal)} đ`, width - basePadding, curY);
+        ctx.fillText(`+${formatMoney(surplusVal)} đ`, width - basePadding, sumY);
       } else {
-        ctx.fillText('🐷 Tổng Heo Đất đã tích lũy:', basePadding, curY);
+        ctx.fillText('🐷 Tổng Heo Đất đã tích lũy:', basePadding, sumY);
         ctx.textAlign = 'right';
-        ctx.fillText(`${formatMoney(surplusVal)} / 1.000.000 đ`, width - basePadding, curY);
+        ctx.fillText(`${formatMoney(surplusVal)} / 1.000.000 đ`, width - basePadding, sumY);
       }
 
-      curY += 24;
-      drawDashedLine(curY);
+      sumY += 24;
+      drawDashedLine(sumY);
 
-      // 6. Footer & Decorative Barcode
-      curY += 34;
+      // 5. Footer & Decorative Barcode
+      sumY += 34;
       ctx.font = 'bold 13px -apple-system, sans-serif';
       ctx.fillStyle = '#0f766e';
       ctx.textAlign = 'center';
-      ctx.fillText('✨ TIẾT KIỆM HÔM NAY - TỰ DO NGÀY MAI ✨', width / 2, curY);
+      ctx.fillText('✨ TIẾT KIỆM HÔM NAY - TỰ DO NGÀY MAI ✨', width / 2, sumY);
 
-      curY += 22;
+      sumY += 22;
       ctx.font = '11.5px monospace';
       ctx.fillStyle = '#94a3b8';
-      ctx.fillText('|| | |||| || ||||| ||| || |||| || |||| |||', width / 2, curY);
-      ctx.fillText(`MÃ PHIẾU: #${Date.now().toString().slice(-8)}`, width / 2, curY + 16);
+      ctx.fillText('|| | |||| || ||||| ||| || |||| || |||| |||', width / 2, sumY);
+      ctx.fillText(`MÃ PHIẾU: #${Date.now().toString().slice(-8)}`, width / 2, sumY + 16);
 
       // Convert canvas to image URL
       const dataUrl = canvas.toDataURL('image/png');
